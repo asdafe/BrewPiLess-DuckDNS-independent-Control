@@ -1,0 +1,79 @@
+@import 'import/vars';
+@import 'import/mixins';
+@import 'layout/reset';
+@import 'layout/typo';
+@import 'layout/layout';
+@import 'layout/base';
+@import 'ui-elements/card';
+@import 'ui-elements/switch';
+@import 'ui-elements/buttons';
+@import 'ui-elements/modal';
+#waitprompt {
+    display: none;
+}
+
+
+/* for network selection */
+
+.center {
+    text-align: center;
+}
+
+div,
+input {
+    padding: 5px;
+    font-size: 1em;
+}
+
+.modal-header {
+    font-weight: bold;
+    font-size: 1.2em;
+}
+
+.modal input {
+    width: 95%;
+}
+
+#networkselection button {
+    border: 0;
+    border-radius: 0.3rem;
+    background-color: #1fa3ec;
+    color: #fff;
+    line-height: 2.4rem;
+    font-size: 1.2rem;
+    width: 96%;
+    margin: 4px;
+}
+
+.scannednetwork {
+    float: right;
+    width: 64px;
+    text-align: right;
+}
+
+.l {
+    background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAALVBMVEX///8EBwfBwsLw8PAzNjaCg4NTVVUjJiZDRUUUFxdiZGSho6OSk5Pg4eFydHTCjaf3AAAAZElEQVQ4je2NSw7AIAhEBamKn97/uMXEGBvozkWb9C2Zx4xzWykBhFAeYp9gkLyZE0zIMno9n4g19hmdY39scwqVkOXaxph0ZCXQcqxSpgQpONa59wkRDOL93eAXvimwlbPbwwVAegLS1HGfZAAAAABJRU5ErkJggg==") no-repeat left center;
+    background-size: 1em;
+}
+
+#networkselection {
+    text-align: left;
+    display: inline-block;
+    min-width: 260px;
+}
+
+#advanced input {
+    width:4em;
+    margin-right: 1em;
+    margin-top: 2px;
+    padding: 0px;
+  }
+  
+  #advanced .inline-header {
+    width: 65%;
+  }
+
+  #advanced .modal-header{
+    border-bottom: #00635a 2px solid;
+  }
+  
