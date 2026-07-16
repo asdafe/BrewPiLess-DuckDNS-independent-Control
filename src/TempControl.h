@@ -81,6 +81,9 @@ struct ControlVariables{
 #define MODE_BEER_PROFILE 'p'
 #define MODE_OFF 'o'
 #define MODE_TEST 't'
+// Heater and cooler are driven fully independently (no PID/cascade), each purely
+// from its own actuator's target band. See TempControl::updateIndependentState().
+#define MODE_INDEPENDENT 'i'
 
 
 enum states{
@@ -191,6 +194,15 @@ class TempControl{
 		return (cs.mode == MODE_BEER_CONSTANT || cs.mode == MODE_BEER_PROFILE);
 	}
 
+	// Actual independent actuator states in MODE_INDEPENDENT (state alone can only
+	// represent one of them at a time, for log-format/backward-compatibility reasons).
+	TEMP_CONTROL_METHOD bool isIndependentHeaterOn(void){
+		return independentHeaterOn;
+	}
+	TEMP_CONTROL_METHOD bool isIndependentCoolerOn(void){
+		return independentCoolerOn;
+	}
+
 	TEMP_CONTROL_METHOD void initFilters();
 
 	TEMP_CONTROL_METHOD bool isDoorOpen() { return doorOpen; }
@@ -204,6 +216,7 @@ class TempControl{
 	TEMP_CONTROL_METHOD void decreaseEstimator(temperature * estimator, temperature error);
 
 	TEMP_CONTROL_METHOD void updateEstimatedPeak(uint16_t estimate, temperature estimator, uint16_t sinceIdle);
+	TEMP_CONTROL_METHOD void updateIndependentState(void);
 	public:
 	TEMP_CONTROL_FIELD TempSensor* beerSensor;
 	TEMP_CONTROL_FIELD TempSensor* fridgeSensor;
@@ -241,6 +254,14 @@ class TempControl{
 	TEMP_CONTROL_FIELD bool doPosPeakDetect;
 	TEMP_CONTROL_FIELD bool doNegPeakDetect;
 	TEMP_CONTROL_FIELD bool doorOpen;
+
+	// MODE_INDEPENDENT only: actual per-actuator on/off state and the time each
+	// actuator last turned on, used for minimum on-time protection (no shared
+	// mutex dead time, since heater and cooler may run at the same time).
+	TEMP_CONTROL_FIELD bool independentHeaterOn;
+	TEMP_CONTROL_FIELD bool independentCoolerOn;
+	TEMP_CONTROL_FIELD uint16_t lastIndependentHeatOnTime;
+	TEMP_CONTROL_FIELD uint16_t lastIndependentCoolOnTime;
 
 	friend class TempControlState;
 };

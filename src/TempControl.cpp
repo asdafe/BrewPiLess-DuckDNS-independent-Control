@@ -74,6 +74,12 @@ uint16_t TempControl::lastIdleTime;
 uint16_t TempControl::lastHeatTime;
 uint16_t TempControl::lastCoolTime;
 uint16_t TempControl::waitTime;
+
+	// MODE_INDEPENDENT only
+bool TempControl::independentHeaterOn;
+bool TempControl::independentCoolerOn;
+uint16_t TempControl::lastIndependentHeatOnTime;
+uint16_t TempControl::lastIndependentCoolOnTime;
 #endif
 
 void TempControl::init(void){
@@ -106,6 +112,8 @@ void TempControl::init(void){
 void TempControl::reset(void){
 	doPosPeakDetect=false;
 	doNegPeakDetect=false;
+	independentHeaterOn=false;
+	independentCoolerOn=false;
 }
 
 void updateSensor(TempSensor* sensor) {
@@ -129,6 +137,11 @@ void TempControl::updateTemperatures(void){
 
 void TempControl::updatePID(void){
 	static unsigned char integralUpdateCounter = 0;
+	if(cs.mode == MODE_INDEPENDENT){
+		// PID/cascade is fully bypassed in independent mode: heater and cooler are
+		// each driven directly from their own target band in updateIndependentState().
+		return;
+	}
 	if(tempControl.modeIsBeer()){
 		if(cs.beerSetting == INVALID_TEMP){
 			// beer setting is not updated yet
@@ -224,6 +237,11 @@ void TempControl::updateState(void){
 #endif
 	}
 
+	if(cs.mode == MODE_INDEPENDENT){
+		updateIndependentState();
+		return;
+	}
+
 	if(cs.mode == MODE_OFF){
 		state = STATE_OFF;
 		stayIdle = true;
@@ -256,7 +274,15 @@ void TempControl::updateState(void){
 				break;
 			}
 			resetWaitTime();
-			if(fridgeFast > (cs.fridgeSetting+cc.idleRangeHigh) ){  // fridge temperature is too high
+			// coolNeeded/heatNeeded are evaluated fully independently, each purely from its
+			// own actuator's target band (no cross-reference to the other actuator's bounds).
+			// This is intentional groundwork for a future "independent" control mode where
+			// heating and cooling may run at the same time; with today's single `state`
+			// value and sane (non-overlapping) target bands, only one of them will actually
+			// be true at a given tick.
+			bool coolNeeded = fridgeFast > (cs.fridgeSetting+cc.coolingTargetUpper);
+			bool heatNeeded = fridgeFast < (cs.fridgeSetting+cc.heatingTargetLower);
+			if(coolNeeded){  // fridge temperature is too high for the cooler's own band
 				#if 1 //SettableMinimumCoolTime
 				tempControl.updateWaitTime(cc.mutexDeadTime, sinceHeating);
 				#else
@@ -285,7 +311,7 @@ void TempControl::updateState(void){
 					}
 				}
 			}
-			else if(fridgeFast < (cs.fridgeSetting+cc.idleRangeLow)){  // fridge temperature is too low
+			if(heatNeeded){  // fridge temperature is too low for the heater's own band
 				#if 1 // SettableMinimumCoolTime
 				tempControl.updateWaitTime(cc.mutexDeadTime, sinceCooling);
 				tempControl.updateWaitTime(cc.minHeatIdleTime, sinceHeating);
@@ -308,8 +334,8 @@ void TempControl::updateState(void){
 					}
 				}
 			}
-			else{
-				state = IDLE; // within IDLE range, always go to IDLE
+			if(!coolNeeded && !heatNeeded){
+				state = IDLE; // within both actuators' bands, always go to IDLE
 				break;
 			}
 			if(state == HEATING || state == COOLING){
@@ -330,8 +356,9 @@ void TempControl::updateState(void){
 			updateEstimatedPeak(cc.maxCoolTimeForEstimate, cs.coolEstimator, sinceIdle);
 			state = COOLING; // set to cooling here, so the display of COOLING/COOLING_MIN_TIME is correct
 
-			// stop cooling when estimated fridge temp peak lands on target or if beer is already too cold (1/2 sensor bit idle zone)
-			if(cv.estimatedPeak <= cs.fridgeSetting || (cs.mode != MODE_FRIDGE_CONSTANT && beerFast < (cs.beerSetting - 16))){
+			// stop cooling when estimated fridge temp peak reaches the cooler's own lower
+			// bound (coolingTargetLower) or if beer is already too cold (1/2 sensor bit idle zone)
+			if(cv.estimatedPeak <= (cs.fridgeSetting + cc.coolingTargetLower) || (cs.mode != MODE_FRIDGE_CONSTANT && beerFast < (cs.beerSetting - 16))){
 				#if 1 //SettableMinimumCoolTime
 				if(sinceIdle > cc.minCoolTime){
 				#else
@@ -356,8 +383,9 @@ void TempControl::updateState(void){
 			updateEstimatedPeak(cc.maxHeatTimeForEstimate, cs.heatEstimator, sinceIdle);
 			state = HEATING; // reset to heating here, so the display of HEATING/HEATING_MIN_TIME is correct
 
-			// stop heating when estimated fridge temp peak lands on target or if beer is already too warm (1/2 sensor bit idle zone)
-			if(cv.estimatedPeak >= cs.fridgeSetting || (cs.mode != MODE_FRIDGE_CONSTANT && beerFast > (cs.beerSetting + 16))){
+			// stop heating when estimated fridge temp peak reaches the heater's own upper
+			// bound (heatingTargetUpper) or if beer is already too warm (1/2 sensor bit idle zone)
+			if(cv.estimatedPeak >= (cs.fridgeSetting + cc.heatingTargetUpper) || (cs.mode != MODE_FRIDGE_CONSTANT && beerFast > (cs.beerSetting + 16))){
 				#if 1 //SettableMinimumCoolTime
 				if(sinceIdle > cc.minHeatTime){
 				#else
@@ -377,6 +405,72 @@ void TempControl::updateState(void){
 	}
 }
 
+// MODE_INDEPENDENT: heater and cooler are each driven purely from their own target
+// band and may be active at the same time. No PID, no shared mutex dead time between
+// heat/cool (they are independent by design), no peak/estimator tuning (PID-only concept).
+//   Cooler target = cs.fridgeSetting (fixed, set manually from the "Independent" tab).
+//   Heater target = cs.beerSetting (the same field the beer-profile ramp/schedule
+//   already writes to via BrewKeeper, so the ramp only ever moves the heater's
+//   target; the cooler target is never touched by it).
+// `state` (shared with the other modes, kept single-valued for log/display backward
+// compatibility) is set with cooling taking priority for display purposes only; the
+// real, independent per-actuator state is available via isIndependentHeaterOn()/
+// isIndependentCoolerOn() and is what updateOutputs() actually acts on.
+void TempControl::updateIndependentState(void){
+	temperature fridgeFast = fridgeSensor->readFastFiltered();
+	ticks_seconds_t secs = ticks.seconds();
+
+	bool coolerAllowed = (cs.fridgeSetting != INVALID_TEMP) && fridgeSensor->isConnected()
+		&& (tempControl.cooler != &defaultActuator);
+	bool heaterAllowed = (cs.beerSetting != INVALID_TEMP) && fridgeSensor->isConnected()
+		&& (tempControl.heater != &defaultActuator || (cc.lightAsHeater && tempControl.light != &defaultActuator));
+
+	if(!coolerAllowed){
+		independentCoolerOn = false;
+	}
+	else if(independentCoolerOn){
+		// already on: only stop once we reach the lower bound AND minCoolTime has elapsed
+		if(fridgeFast <= (cs.fridgeSetting + cc.coolingTargetLower)
+			&& ticks.timeSince(lastIndependentCoolOnTime) > cc.minCoolTime){
+			independentCoolerOn = false;
+		}
+	}
+	else if(fridgeFast > (cs.fridgeSetting + cc.coolingTargetUpper)
+		&& ticks.timeSince(lastCoolTime) > cc.minCoolIdleTime){
+		// off: only start once we cross the upper bound AND minCoolIdleTime has elapsed
+		independentCoolerOn = true;
+		lastIndependentCoolOnTime = secs;
+	}
+	if(independentCoolerOn) lastCoolTime = secs;
+
+	if(!heaterAllowed){
+		independentHeaterOn = false;
+	}
+	else if(independentHeaterOn){
+		if(fridgeFast >= (cs.beerSetting + cc.heatingTargetUpper)
+			&& ticks.timeSince(lastIndependentHeatOnTime) > cc.minHeatTime){
+			independentHeaterOn = false;
+		}
+	}
+	else if(fridgeFast < (cs.beerSetting + cc.heatingTargetLower)
+		&& ticks.timeSince(lastHeatTime) > cc.minHeatIdleTime){
+		independentHeaterOn = true;
+		lastIndependentHeatOnTime = secs;
+	}
+	if(independentHeaterOn) lastHeatTime = secs;
+
+	if(!independentCoolerOn && !independentHeaterOn){
+		lastIdleTime = secs;
+		state = IDLE;
+	}
+	else if(independentCoolerOn){
+		state = COOLING;
+	}
+	else{
+		state = HEATING;
+	}
+}
+
 void TempControl::updateEstimatedPeak(uint16_t timeLimit, temperature estimator, uint16_t sinceIdle)
 {
 	uint16_t activeTime = min(timeLimit, sinceIdle); // heat or cool time in seconds
@@ -392,8 +486,10 @@ void TempControl::updateOutputs(void) {
 		return;
 
 	cameraLight.update();
-	bool heating = stateIsHeating();
-	bool cooling = stateIsCooling();
+	// In independent mode, `state` can only show one of heat/cool (display priority),
+	// so use the real independent per-actuator flags instead of stateIsHeating/Cooling.
+	bool heating = (cs.mode == MODE_INDEPENDENT) ? independentHeaterOn : stateIsHeating();
+	bool cooling = (cs.mode == MODE_INDEPENDENT) ? independentCoolerOn : stateIsCooling();
 	cooler->setActive(cooling);
 	heater->setActive(!cc.lightAsHeater && heating);
 	light->setActive(isDoorOpen() || (cc.lightAsHeater && heating) || cameraLightState.isActive());
@@ -402,6 +498,11 @@ void TempControl::updateOutputs(void) {
 
 
 void TempControl::detectPeaks(void){
+	// Peak detection only tunes the PID overshoot estimators, which independent
+	// mode never uses (doPosPeakDetect/doNegPeakDetect are never set while in
+	// MODE_INDEPENDENT), so skip it entirely.
+	if(cs.mode == MODE_INDEPENDENT) return;
+
 	//detect peaks in fridge temperature to tune overshoot estimators
 	LOG_ID_TYPE detected = 0;
 	temperature peak, estimate, error, oldEstimator, newEstimator;
@@ -625,10 +726,11 @@ void TempControl::setBeerTemp(temperature newTemp){
 	}
 	updatePID();
 	updateState();
-	if(cs.mode != MODE_BEER_PROFILE || abs(storedBeerSetting - newTemp) > intToTempDiff(1)/4){
+	if((cs.mode != MODE_BEER_PROFILE && cs.mode != MODE_INDEPENDENT) || abs(storedBeerSetting - newTemp) > intToTempDiff(1)/4){
 		// more than 1/4 degree C difference with EEPROM
 		// Do not store settings every time in profile mode, because EEPROM has limited number of write cycles.
-		// A temperature ramp would cause a lot of writes
+		// A temperature ramp would cause a lot of writes. The same applies to independent mode,
+		// since the ramp there drives cs.beerSetting (the heater target) exactly the same way.
 		// If Raspberry Pi is connected, it will update the settings anyway. This is just a safety feature.
 		eepromManager.storeTempSettings();
 	}
@@ -662,11 +764,10 @@ const ControlConstants TempControl::ccDefaults PROGMEM =
 	/* Kd	*/ intToTempDiff(-3)/2,	// -1.5
 	/* iMaxError */ intToTempDiff(5)/10,  // 0.5 deg
 
-	// Stay Idle when fridge temperature is in this range
-	/* idleRangeHigh */ intToTempDiff(1),	// +1 deg Celsius
-	/* idleRangeLow */ intToTempDiff(-1),	// -1 deg Celsius
-
-	// when peak falls between these limits, its good.
+	// Each actuator now owns its own independent on/off band:
+	// heatingTargetLower/coolingTargetUpper gate when heat/cool starts,
+	// heatingTargetUpper/coolingTargetLower gate when heat/cool stops
+	// (and, unchanged from before, tune the overshoot estimator in detectPeaks).
 	/* heatingTargetUpper */ intToTempDiff(3)/10,	// +0.3 deg Celsius
 	/* heatingTargetLower */ intToTempDiff(-2)/10,	// -0.2 deg Celsius
 	/* coolingTargetUpper */ intToTempDiff(2)/10,	// +0.2 deg Celsius

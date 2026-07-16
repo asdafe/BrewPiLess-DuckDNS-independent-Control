@@ -463,6 +463,12 @@ char ExternalData::deviceBatteryUnit(void){
 	return 'V';
 }
 
+float ExternalData::deviceBatteryPercent(void){
+	if(!IsVoltageValid(_deviceVoltage)) return INVALID_VOLTAGE;
+	if(deviceBatteryUnit() == '%') return _deviceVoltage; // Pill: already a state-of-charge percentage
+	return voltageToLipoPercent(_deviceVoltage); // iSpindel: raw LiPo cell voltage
+}
+
 void ExternalData::setGravity(float gravity){
 	userSetGravity(gravity, -1);
 }

@@ -1,3 +1,5 @@
+#This build is made for single fridge with holding beer and brewing at the same time, and using optional duckdns updater for dynamic ip using home internet users.
+
 # BrewPiLess
  **Note: Beer Profile exteds to maximum 10 steps. Your setting might lost. There is an utility, /extra/backup.htm. You can upload this file and use it to backup/restore the settings.**
 
@@ -44,6 +46,17 @@ You will need to run the hardware setup procedure after upgrading to v2.4 from p
 * The gravity caluated by the controller is slightly different from that shown on chart. It is because the formula are derived speratedly. Due to different float precision, the formula is different. The difference should be small, though.
 
 ## Version History
+ * 4.6 (local build, not an official vitotai release)
+   * New **Independent** control mode: heater and cooler are driven completely independently of each other (can run simultaneously), using dedicated on/off thresholds instead of PID/cascade control.
+     * Removed `idleRangeHigh`/`idleRangeLow`. Added `coolingTargetUpper`/`coolingTargetLower` and `heatingTargetUpper`/`heatingTargetLower` as the on/off trigger points for the cooler and heater (used by Independent mode; existing modes are unaffected).
+     * Independent mode supports the Beer Profile "ramp" feature for the **heater** target only; the cooler target stays fixed.
+     * Web UI: new "Independent" tab on the control page with separate Cooling Target / Heating Target fields (pre-filled with the currently configured values).
+     * Web UI: status area now shows "Heating+Cooling" (instead of just "Cooling") when both are active at once in Independent mode.
+     * LCD: shows "Independent" as the mode name and a combined "Heat+Cool" state line when both outputs are active; Beer/Fridge row labels are unchanged in every mode.
+   * iSpindel: estimated battery percentage is now shown next to the voltage (e.g. "3.57V (38%)"), calculated with the same voltage/percentage curve used by GravityMon's own web UI so the numbers match. Also sent live over WebSocket (`bp` field).
+   * Added an optional DuckDNS dynamic-DNS updater (`src/DuckDNSUpdater.*`), checking every 30 minutes in the main loop (non-blocking, `millis()`-based).
+   * EEPROM/LittleFS `ControlConstants` format bumped to version 5, with migration from the previous format (old `idleRange` fields are dropped, existing settings are preserved).
+   *Duckdns token and username are hardcoded in the "DuckDNSUpdater.h" file this design is by choice for me so dont forget to change it before flashing.
  * 4.5
    * **You will lost settings. Backup before upgrading. Delete all logs also**
    * Humidity control fixed.

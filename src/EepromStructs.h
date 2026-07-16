@@ -22,8 +22,11 @@ struct ControlConstants {
 	temperature Ki;
 	temperature Kd;
 	temperature iMaxError;
-	temperature idleRangeHigh;
-	temperature idleRangeLow;
+	// idleRangeHigh/idleRangeLow removed in EEPROM_FORMAT_VERSION 5. The on/off
+	// hysteresis decision is now driven independently per actuator by
+	// heatingTargetLower (heat trigger) and coolingTargetUpper (cool trigger)
+	// below - see ControlConstants_v1/migrateControlConstantsFromV1 for the
+	// migration of pre-existing EEPROM/LittleFS data.
 	temperature heatingTargetUpper;
 	temperature heatingTargetLower;
 	temperature coolingTargetUpper;
@@ -48,6 +51,86 @@ struct ControlConstants {
     uint16_t mutexDeadTime;
 #endif
 };
+
+/*
+ * Byte-identical mirror of the pre-EEPROM_FORMAT_VERSION-5 ControlConstants layout
+ * (back when idleRangeHigh/idleRangeLow still existed). Kept ONLY so that existing
+ * EEPROM (ESP8266) / LittleFS-SPIFFS (ESP32) data can be migrated in place - do not
+ * use this struct anywhere else and do not change its layout.
+ */
+struct ControlConstants_v1 {
+	char tempFormat;
+	temperature tempSettingMin;
+	temperature tempSettingMax;
+	temperature Kp;
+	temperature Ki;
+	temperature Kd;
+	temperature iMaxError;
+	temperature idleRangeHigh;
+	temperature idleRangeLow;
+	temperature heatingTargetUpper;
+	temperature heatingTargetLower;
+	temperature coolingTargetUpper;
+	temperature coolingTargetLower;
+	uint16_t maxHeatTimeForEstimate;
+	uint16_t maxCoolTimeForEstimate;
+	uint8_t fridgeFastFilter;
+	uint8_t fridgeSlowFilter;
+	uint8_t fridgeSlopeFilter;
+	uint8_t beerFastFilter;
+	uint8_t beerSlowFilter;
+	uint8_t beerSlopeFilter;
+	uint8_t lightAsHeater;
+	uint8_t rotaryHalfSteps;
+	temperature pidMax;
+#if 1 // SettableMinimumCoolTime
+	uint16_t minCoolTime;
+	uint16_t minCoolIdleTime;
+	uint16_t minHeatTime;
+	uint16_t minHeatIdleTime;
+	uint16_t mutexDeadTime;
+#endif
+};
+
+/*
+ * Migrates a pre-v5 ControlConstants blob (with idleRangeHigh/idleRangeLow) into the
+ * current layout. heatingTargetLower/coolingTargetUpper now drive the on/off trigger
+ * that idleRangeLow/idleRangeHigh used to drive, so they are seeded from those old
+ * values to preserve the previously configured deadband. heatingTargetUpper and
+ * coolingTargetLower already existed under the same name/role (peak estimator tuning
+ * in TempControl::detectPeaks) and are simply carried over unchanged.
+ */
+static inline void migrateControlConstantsFromV1(const ControlConstants_v1& legacy, ControlConstants& target) {
+	target.tempFormat = legacy.tempFormat;
+	target.tempSettingMin = legacy.tempSettingMin;
+	target.tempSettingMax = legacy.tempSettingMax;
+	target.Kp = legacy.Kp;
+	target.Ki = legacy.Ki;
+	target.Kd = legacy.Kd;
+	target.iMaxError = legacy.iMaxError;
+	target.heatingTargetUpper = legacy.heatingTargetUpper;
+	target.heatingTargetLower = legacy.idleRangeLow;	// was the heat-trigger bound
+	target.coolingTargetUpper = legacy.idleRangeHigh;	// was the cool-trigger bound
+	target.coolingTargetLower = legacy.coolingTargetLower;
+	target.maxHeatTimeForEstimate = legacy.maxHeatTimeForEstimate;
+	target.maxCoolTimeForEstimate = legacy.maxCoolTimeForEstimate;
+	target.fridgeFastFilter = legacy.fridgeFastFilter;
+	target.fridgeSlowFilter = legacy.fridgeSlowFilter;
+	target.fridgeSlopeFilter = legacy.fridgeSlopeFilter;
+	target.beerFastFilter = legacy.beerFastFilter;
+	target.beerSlowFilter = legacy.beerSlowFilter;
+	target.beerSlopeFilter = legacy.beerSlopeFilter;
+	target.lightAsHeater = legacy.lightAsHeater;
+	target.rotaryHalfSteps = legacy.rotaryHalfSteps;
+	target.pidMax = legacy.pidMax;
+#if 1 // SettableMinimumCoolTime
+	target.minCoolTime = legacy.minCoolTime;
+	target.minCoolIdleTime = legacy.minCoolIdleTime;
+	target.minHeatTime = legacy.minHeatTime;
+	target.minHeatIdleTime = legacy.minHeatIdleTime;
+	target.mutexDeadTime = legacy.mutexDeadTime;
+#endif
+}
 
 
 

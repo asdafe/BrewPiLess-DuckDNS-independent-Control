@@ -714,7 +714,7 @@ var ControlChart = {
 
 var modekeeper = {
     initiated: false,
-    modes: ["profile", "beer", "fridge", "off"],
+    modes: ["profile", "beer", "fridge", "off", "independent"],
     cmode: 0,
     dselect: function(m) {
         var d = document.getElementById(m + "-m");
@@ -731,7 +731,7 @@ var modekeeper = {
         var me = this;
         if (me.initiated) return;
         me.initiated = true;
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < me.modes.length; i++) {
             var m = me.modes[i];
             document.getElementById(m + "-s").style.display = "none";
             document.getElementById(m + "-m").onclick = function() {
@@ -766,6 +766,18 @@ var modekeeper = {
         } else if (this.cmode == "off") {
             //console.log("j{mode:o}");
             BWF.send("j{mode:o}");
+        } else if (this.cmode == "independent") {
+            var vc = document.getElementById("independent-cool-t").value;
+            var vh = document.getElementById("independent-heat-t").value;
+            if (vc == '' || isNaN(vc) || (vc > BrewPiSetting.maxDegree || vc < BrewPiSetting.minDegree)) {
+                alert("<%= script_control_invalid_temperature %>" + vc);
+                return;
+            }
+            if (vh == '' || isNaN(vh) || (vh > BrewPiSetting.maxDegree || vh < BrewPiSetting.minDegree)) {
+                alert("<%= script_control_invalid_temperature %>" + vh);
+                return;
+            }
+            BWF.send("j{mode:i, fridgeSet:" + vc + ", beerSet:" + vh + "}");
         } else {
             // should save first.
             if (profileEditor.dirty) {
@@ -943,6 +955,21 @@ function initctrl() {
                     PTC.config(c.ptc);
                 if (typeof c["rh"] != "undefined")
                     HC_show(c.rh);
+                // Independent mode's targets are cs.fridgeSetting/cs.beerSetting under the
+                // hood (see TempControl::updateIndependentState()), sent here as fs/bs.
+                // Pre-fill the tab with the currently configured values, but only while
+                // the box is still empty so an in-progress edit is never clobbered by a
+                // later status push.
+                if (c["md"] == "i") {
+                    var coolBox = Q("#independent-cool-t");
+                    if (coolBox && coolBox.value === "" && typeof c["fs"] != "undefined" && c["fs"] > -10000) {
+                        coolBox.value = (c["fs"] / 100).toFixed(1);
+                    }
+                    var heatBox = Q("#independent-heat-t");
+                    if (heatBox && heatBox.value === "" && typeof c["bs"] != "undefined" && c["bs"] > -10000) {
+                        heatBox.value = (c["bs"] / 100).toFixed(1);
+                    }
+                }
                 
             },
             C: function(c) { ccparameter(c); } //,

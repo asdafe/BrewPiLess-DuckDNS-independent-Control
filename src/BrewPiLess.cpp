@@ -49,6 +49,7 @@
 
 #include "GravityTracker.h"
 #include "BrewKeeper.h"
+#include "DuckDNSUpdater.h"
 #ifdef ENABLE_LOGGING
 #include "DataLogger.h"
 #endif
@@ -1143,6 +1144,15 @@ void periodicalReport(void)
 	doc["sl"] = brewPi.getStatusTime();
 	doc["tu"] = String(unit);
 
+	// Independent mode can have the heater and cooler on at the same time; "st"
+	// alone can only report one of them (see TempControl::updateIndependentState()),
+	// so expose the real per-actuator flags for the web UI to show a combined
+	// "Heating+Cooling" status. Only meaningful (and only sent) in independent mode.
+	if(mode == MODE_INDEPENDENT){
+		doc["ih"] = tempControl.isIndependentHeaterOn()? 1:0;
+		doc["ic"] = tempControl.isIndependentCoolerOn()? 1:0;
+	}
+
 
 #if EanbleParasiteTempControl
 	doc["ptc"] = String(parasiteTempController.getMode());
@@ -1187,6 +1197,12 @@ void periodicalReport(void)
 	G["a"] = externalData.tiltValue();
 	// battery, for iSPindel & Pill
 	G["b"] = externalData.deviceVoltage();
+	// battery percent estimate (LiPo curve for iSpindel, direct state-of-charge for
+	// Pill); -1 when not available so the frontend can fall back to voltage-only.
+	{
+		float batPct = externalData.deviceBatteryPercent();
+		G["bp"] = (batPct >= 0)? (int)(batPct + 0.5) : -1;
+	}
 
 	String out="A:";
 	serializeJson(doc,out);
@@ -2224,6 +2240,8 @@ void loop(void){
 	if(!IS_RESTARTING){
 		WiFiSetup.stayConnected();
 	}
+
+	duckDNSUpdater.update();
 
   	if(_systemState ==SystemStateRestartPending){
 	  	_time=millis();
